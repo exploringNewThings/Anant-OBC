@@ -10,6 +10,7 @@
 #include <linux/i2c.h>
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 
 #include "hmc5883l_ioctl.h"
 
@@ -122,7 +123,7 @@ static int hmc5883l_set_mode(struct i2c_client *client,
     s32 result;
     mode = mode & MODE_SETTING;
     if (mode >= MAX_MODE) {
-       printk(KERN_ERR "HMC5883L: Invalid mode\n");
+       printk(KERN_DEBUG "HMC5883L: Invalid mode\n");
         return -EINVAL;
     }
     mutex_lock(&hmc5883l->lock);
@@ -161,7 +162,7 @@ static int hmc5883l_set_gain(struct i2c_client *client,
     s32 result;
     gain = gain & GAIN_SETTING;
     if (gain > 7 || gain < 0) {
-        printk(KERN_ERR "HMC5883L: Invalid gain\n");
+        printk(KERN_DEBUG "HMC5883L: Invalid gain\n");
         return -EINVAL;
     }
     mutex_lock(&hmc5883l->lock);
@@ -199,7 +200,7 @@ static s32 hmc5883l_set_data_out_rate(struct i2c_client *client,
 {
     rate = rate & DATA_OUT_RATE;
     if (rate >= 7 || rate < 0) {
-        printk(KERN_ERR "HMC5883L: Invalid data out rate \n");
+        printk(KERN_DEBUG "HMC5883L: Invalid data out rate \n");
         return -EINVAL;
     }
     mutex_lock(&hmc5883l->lock);
@@ -216,15 +217,137 @@ static u8 hmc5883l_get_data_out_rate(struct i2c_client *client)
 static long hmc5883l_ioctl(struct file *fi,
 			unsigned int cmd, unsigned long arg)
 			{
-		printk(KERN_ERR "IOCTL called : %u\n", arg);
+		printk(KERN_DEBUG "IOCTL called : %u\n", arg);
+		mutex_lock(&hmc5883l->lock);
+		struct i2c_client *client = hmc5883l->client;
+		mutex_unlock(&hmc5883l->lock);
 
 			switch(cmd){
 				case HMC5883L_READ:
+					{
 					hmc5883l_read_block();
-					if(copy_to_user((unsigned char *)arg, hmc5883l->axis, 1)){
+					printk(KERN_DEBUG "HMC5883L: x value - %d\n",hmc5883l->axis[0]);
+					printk(KERN_DEBUG "HMC5883L: y value - %d\n",hmc5883l->axis[1]);
+					printk(KERN_DEBUG "HMC5883L: z value - %d\n",hmc5883l->axis[2]);
+					mutex_lock(&hmc5883l->lock);
+					if(copy_to_user((unsigned short *)arg, hmc5883l->axis, 6)){
+					mutex_unlock(&hmc5883l->lock);
 					return -EFAULT;
 					}
+					mutex_unlock(&hmc5883l->lock);
+					return 0;}
+
+				case HMC5883L_GET_MODE:
+					{	
+						u8 mode = hmc5883l_get_mode(client);
+						if(copy_to_user((unsigned short *)arg, &mode, 1)){
+							       return -EFAULT;
+							       }
+						return 0;
+						}		
+
+
+
+				case HMC5883L_GET_SAMPLE:
+				{
+					u8 sample = hmc5883l_get_sample_average(client);
+					if(copy_to_user((unsigned short *)arg, &sample, 1)){
+							return -EFAULT;
+							}
+						return 0;
+						}
+
+				case HMC5883L_GET_GAIN:
+				{
+					u8 gain = hmc5883l_get_gain(client);
+					if(copy_to_user((unsigned short *)arg, &gain, 1)){
+							return -EFAULT;
+							}
+						return 0;
+						}
+
+				case HMC5883L_GET_MESURA:
+				{
+					u8 mesura = hmc5883l_get_mesura(client);
+					if(copy_to_user((unsigned short *)arg, &mesura, 1)){
+						return -EFAULT;
+						}
 					return 0;
+					}
+
+				case HMC5883L_GET_OUT_RATE:
+				{
+					u8 rate = hmc5883l_get_data_out_rate(client);
+					if(copy_to_user((unsigned short *)arg, &rate, 1)){
+							return -EFAULT;
+							}
+					return 0;
+					}
+			
+				case HMC5883L_SET_MODE:
+				{
+					u8 mode;
+					if(copy_from_user(&mode, (unsigned short *)arg, 1)){
+							return -EFAULT;
+						}
+					if(hmc5883l_set_mode(client, mode)<0){
+							return -EFAULT;
+							}
+							return 0;
+							}
+
+				
+				case HMC5883L_SET_SAMPLE:
+				{
+					u8 sample;
+					if(copy_from_user(&sample, (unsigned short *)arg, 1)){
+							return -EFAULT;
+							}
+					if(hmc5883l_set_sample_average(client, sample)<0){
+						return -EFAULT;
+						}
+						return 0;
+						}
+
+				case HMC5883L_SET_GAIN:
+   				{
+					u8 gain;
+					if(copy_from_user(&gain, (unsigned short *)arg, 1)){
+							return -EFAULT;
+							}
+					if(hmc5883l_set_gain(client, gain)<0){
+						return -EFAULT;
+						}
+						return 0;
+						}
+
+	
+				case HMC5883L_SET_MESURA:
+				{
+					u8 mesura;
+					if(copy_from_user(&mesura, (unsigned short *)arg, 1)){
+							return -EFAULT;
+							}
+					if(hmc5883l_set_mesura(client, mesura)<0){
+						return -EFAULT;
+						}
+						return 0;
+						}
+
+
+				case HMC5883L_SET_OUT_RATE:
+				{
+					u8 rate;
+					if(copy_from_user(&rate, (unsigned short *)arg, 1)){
+							return -EFAULT;
+							}
+					if(hmc5883l_set_data_out_rate(client, rate)<0){
+						return -EFAULT;
+						}
+						return 0;
+						}
+
+
 				default:
 				return -ENOTTY;
 			}
@@ -298,32 +421,28 @@ static struct i2c_driver hmc5883l_driver = {
 
 static int __init hmc5883l_init(void)
 {
-	printk(KERN_ERR "HMC5883L: Init called\n");	
 	int err;
 	hmc5883l = kzalloc(sizeof(struct sensor_hmc5883l), GFP_KERNEL);
 	if(!hmc5883l){
-		printk(KERN_ERR "HMC5883L: Cannot create hmc5883l structure\n");
+		printk(KERN_DEBUG "HMC5883L: Cannot create hmc5883l structure\n");
 		return -ENOMEM;
 	}
 	if(alloc_chrdev_region(&hmc5883l_dev_number, 0, 1, "hmc5883l")){
-		printk(KERN_ERR "HMC5883L: Can't register device\n");
+		printk(KERN_DEBUG "HMC5883L: Can't register device\n");
 		return -1;
 	}
 	hmc5883l_class = class_create(THIS_MODULE, "hmc5883l-i2c");
 	cdev_init(&(hmc5883l->c_dev), &hmc5883l_fops);
 	if(cdev_add(&(hmc5883l->c_dev),hmc5883l_dev_number, 1)){
-		printk(KERN_ERR "HMC5883L: Can't add device");
+		printk(KERN_DEBUG "HMC5883L: Can't add device");
 	}
-	printk(KERN_ERR "HMC5883L: After add\n");
 	mutex_init(&hmc5883l->lock);
-	printk(KERN_ERR "%p\n", &hmc5883l_driver);
 	err = i2c_add_driver(&hmc5883l_driver);
-	printk(KERN_ERR "HMC5883L: After i2c add\n");
 	if(err){
-		printk(KERN_ERR "HMC5883L: Registering on I2C core failed\n");
+		printk(KERN_DEBUG "HMC5883L: Registering on I2C core failed\n");
 		return err; 
 	}
-	printk("HMC5883l initialized\n");
+	device_create(hmc5883l_class, NULL, hmc5883l_dev_number, NULL, "hmc5883l-i2c"); 
 	printk("HMC5883L: Major number: %d Minor number: %d\n", MAJOR(hmc5883l_dev_number),MINOR(hmc5883l_dev_number));
 	return 0;
 }
