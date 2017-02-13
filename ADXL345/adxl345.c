@@ -60,12 +60,6 @@ static int adxl345_write_reg(struct spi_device* spi, unsigned char address, unsi
 	return spi_write_then_read(spi, buf, 2, NULL, 0);
 }
 
-+	u8 cmd = OP_READ_STATUS, status;
- 	/*
- 	 * NOTE:  at45db321c over 25 MHz wants to write
- 	 * a dummy byte after the opcode...
- 	 */
--	ret = spi_flash_cmd(spi, OP_READ_STATUS
 static int data_format_config(struct spi_device* spi)
 {
 	u8 data_format;
@@ -110,6 +104,16 @@ static int adxl345_probe(struct spi_device *spi)
 	int err;
 	mutex_lock(&adxl345->lock);
 	adxl345->adxl345_spi = spi;
+	mutex_unlock(&adxl345->lock);
+	err = adxl345_readings();
+	if(err){
+		printk(KERN_DEBUG "ADXL345: Cannot get any readings\n");
+		return err;
+		}
+	mutex_lock(&adxl345->lock);
+	printk(KERN_DEBUG "ADXL345: %hd %hd %hd \n", adxl345->axis_data[0], adxl345->axis_data[1], adxl345->axis_data[2]);
+	mutex_unlock(&adxl345->lock);
+	mutex_lock(&adxl345->lock);
 	data_format_config(adxl345->adxl345_spi);
 	power_configure(adxl345->adxl345_spi);
 	fifo_control(adxl345->adxl345_spi);
