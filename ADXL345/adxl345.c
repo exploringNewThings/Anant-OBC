@@ -17,7 +17,7 @@ static struct sensor_adxl345{
 	struct spi_device *adxl345_spi;
 	struct mutex lock;
 	u16 axis_data[AXIS];
-	struct spi_transfer adxl345_transfer;
+	//struct spi_transfer adxl345_transfer;
 	struct cdev c_dev;
 	dev_t adxl345_dev_number;
 	struct class *adxl345_class;
@@ -25,20 +25,23 @@ static struct sensor_adxl345{
 
 static struct sensor_adxl345 *adxl345;
 
-static int adxl345_readings()
+static int adxl345_readings(void)
 {
-	unsigned buf[7];
+	unsigned char buf;
 	int err,
-	    i;
-	buf[0] = DATA_START;
-	err = spi_write_then_read(adxl345->adxl345_spi, buf, 1, buf, 6);
+	    i;		/*iterator*/
+	buf = DATA_START;
+	mutex_lock(&adxl345->lock);
+	err = spi_write_then_read(adxl345->adxl345_spi, &buf, 1, (u8 *) adxl345->axis_data, 6);
+	mutex_unlock(&adxl345->lock);
 	if(err){
 		printk(KERN_DEBUG "ADXL345: Cannot read.\n");
 		return err;
 	}
-	adxl345->axis_data = (buf + 1);
 	for(i = 0; i < AXIS; i++){
-		adxl345->axis[i] = be16_to_cpu(adxl345->axis[i]);
+		mutex_lock(&adxl345->lock);
+		adxl345->axis_data[i] = be16_to_cpu(adxl345->axis_data[i]);
+		mutex_unlock(&adxl345->lock);
 	}
 	return 0;
 }
@@ -57,6 +60,12 @@ static int adxl345_write_reg(struct spi_device* spi, unsigned char address, unsi
 	return spi_write_then_read(spi, buf, 2, NULL, 0);
 }
 
++	u8 cmd = OP_READ_STATUS, status;
+ 	/*
+ 	 * NOTE:  at45db321c over 25 MHz wants to write
+ 	 * a dummy byte after the opcode...
+ 	 */
+-	ret = spi_flash_cmd(spi, OP_READ_STATUS
 static int data_format_config(struct spi_device* spi)
 {
 	u8 data_format;
@@ -90,7 +99,7 @@ static int fifo_control(struct spi_device* spi)
 	fifo_ctl = 0x00;
 	err = adxl345_write_reg(spi, FIFO_CTL, fifo_ctl);
 	if(err){
-		prinkt(KERN_DEBUG "ADXL345: FIFO Control Register can't be configured.\n");
+		printk(KERN_DEBUG "ADXL345: FIFO Control Register can't be configured.\n");
 		return err;
 	}
 	return 0;
@@ -99,12 +108,12 @@ static int fifo_control(struct spi_device* spi)
 static int adxl345_probe(struct spi_device *spi)
 {
 	int err;
-	mutex_lock(adxl345->lock);
+	mutex_lock(&adxl345->lock);
 	adxl345->adxl345_spi = spi;
-	mutex_unlock(adxl345->lock);
-	data_format_config(spi);
-	power_configure(spi);
-	fifo_control(spi);
+	data_format_config(adxl345->adxl345_spi);
+	power_configure(adxl345->adxl345_spi);
+	fifo_control(adxl345->adxl345_spi);
+	mutex_unlock(&adxl345->lock);
 	/*adxl345->adxl345_spi->max_speeed_hz = 5000000;
 	err = spi_setup(adxl345->adxl345_spi);
 	if(!err){
@@ -123,7 +132,7 @@ static int adxl345_remove(struct spi_device *spi)
 
 static const struct of_device_id adxl345_of_match[] = {
 	{
-		.compatible = "",
+		.compatible = "adxl345",
 		.data = 0,
 	},
 	{}
@@ -132,7 +141,7 @@ MODULE_DEVICE_TABLE(of, adxl345_of_match);
 
 static struct spi_driver adxl345_driver = {
 	.driver = {
-		.name = SENOR_ID,
+		.name = SENSOR_ID,
 		.owner = THIS_MODULE,
 		.of_match_table = adxl345_of_match,
 	},
@@ -161,7 +170,7 @@ static long adxl345_ioctl(struct file *fi, unsigned int cmd, unsigned long arg)
 		case ADXL345_READ:
 			adxl345_readings();
 			mutex_lock(&adxl345->lock);
-			if(copy_to_user((unsigned short *)arg, adxl345->axis, 6)){
+			if(copy_to_user((unsigned short *)arg, adxl345->axis_data, 6)){
 				mutex_unlock(&adxl345->lock);
 				return -EFAULT;
 			}
@@ -186,10 +195,10 @@ static int __init adxl345_init(void)
 	adxl345 = kzalloc(sizeof(struct sensor_adxl345), GFP_KERNEL);
 	if(!adxl345){
 		printk(KERN_DEBUG "ADXL345: Cannot create adxl345 structure\n");
-		return -ENOMEN;
+		return -ENOMEM;
 	}
 	
-	if(alloc_chrdev_region(&adxl345_dev_number, 0, 1, "adxl345")){
+	if(alloc_chrdev_region(&adxl345->adxl345_dev_number, 0, 1, "adxl345")){
 		printk(KERN_DEBUG "ADXL345: Cannot register char device\n");
 		return -1;
 	}
@@ -204,7 +213,7 @@ static int __init adxl345_init(void)
 	}
 	mutex_init(&adxl345->lock);
 	spi_register_driver(&adxl345_driver);
-	device_create(adxl345->adxl345_class, NULL, adxl345->dev_number);
+	device_create(adxl345->adxl345_class, NULL, adxl345->adxl345_dev_number,NULL, "adxl345");
 	printk(KERN_DEBUG "ADXL345: Major number: %d Minor number: %d\n", MAJOR(adxl345->adxl345_dev_number), MINOR(adxl345->adxl345_dev_number));
 	return 0;
 }
